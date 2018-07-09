@@ -7,13 +7,14 @@ from datetime import timedelta
 import math
 from tensorflow.examples.tutorials.mnist import input_data
 
+import prettytensor as pt
+
+
 # Configuration of Neural Network
 filter_size_1 = 5
 num_filters_1 = 16
 filter_size_2 = 5
 num_filters_2 = 36
-filter_size_3 = 5
-num_filters_3 = 56
 fc_size = 128
 
 # Load Data
@@ -66,93 +67,41 @@ cls_true = data.test.cls[0:9]
 plot_images(images=images, cls_true=cls_true)
 
 
-# Helper functions for creating variables
-def new_weights(shape):
-    return tf.Variable(tf.truncated_normal(shape, stddev=0.05))
-
-
-def new_biases(length):
-    return tf.Variable(tf.constant(0.05, shape=[length]))
-
-
-# Helper function for creating a new convolutional layer
-def new_conv_layer(input, num_input_channels, filter_size, num_filters, use_pooling=True):
-    shape = [filter_size, filter_size, num_input_channels, num_filters]
-
-    weights = new_weights(shape)
-    biases = new_biases(num_filters)
-
-    layer = tf.nn.conv2d(input=input, filter=weights, strides=[1, 1, 1, 1], padding='SAME')
-    layer += biases
-
-    if use_pooling:
-        layer = tf.nn.max_pool(value=layer, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
-
-    layer = tf.nn.relu(layer)
-
-    return layer, weights
-
-
-# Helper function for flattening a layer
-def flatten_layer(layer):
-    layer_shape = layer.get_shape()
-    num_features = layer_shape[1:4].num_elements()
-    layer_flat = tf.reshape(layer, [-1, num_features])
-
-    return layer_flat, num_features
-
-
-# Helper function for creating a new fully-connected layer
-def new_fc_layer(input, num_inputs, num_outputs, use_relu=True):
-    weights = new_weights(shape=[num_inputs, num_outputs])
-    biases = new_biases(length=num_outputs)
-    layer = tf.matmul(input, weights) + biases
-
-    if use_relu:
-        layer = tf.nn.relu(layer)
-
-    return layer
-
-
 # Placeholder variables
 x = tf.placeholder(tf.float32, shape=[None, img_size_flat], name='x')
 x_image = tf.reshape(x, [-1, img_size, img_size, num_channels])
 y_true = tf.placeholder(tf.float32, shape=[None, num_classes], name='y_true')
 y_true_cls = tf.argmax(y_true, axis=1)
 
-keep_prob = tf.placeholder(tf.float32, name='keep_prob')
+# PrettyTensor Implementation
+x_pretty = pt.wrap(x_image)
 
-# Convolutional Layer 1
-layer_conv_1, weight_conv_1 = new_conv_layer(input=x_image, num_input_channels=num_channels, filter_size=filter_size_1, num_filters=num_filters_1, use_pooling=True)
+with pt.defaults_scope(activation_fn=tf.nn.relu):
+    y_pred, loss = x_pretty.\
+        conv2d(kernel=5, depth=16, name='layer_conv_1').\
+        max_pool(kernel=2, stride=2).\
+        conv2d(kernel=5, depth=36, name='layer_conv_2').\
+        max_pool(kernel=2, stride=2).\
+        flatten().\
+        fully_connected(size=128, name='layer_fc_1').\
+        softmax_classifier(num_classes=num_classes, labels=y_true)
 
-# Convolutional Layer 2
-layer_conv_2, weight_conv_2 = new_conv_layer(input=layer_conv_1, num_input_channels=num_filters_1, filter_size=filter_size_2, num_filters=num_filters_2, use_pooling=True)
 
-#layer_conv_3, weight_conv_3 = new_conv_layer(input=layer_conv_2, num_input_channels=num_filters_2, filter_size=filter_size_3, num_filters=num_filters_3, use_pooling=True)
+# Getting the Weights
+def get_weights_variable(layer_name):
+    with tf.variable_scope(layer_name, reuse=True):
+        variable = tf.get_variable('weights')
 
-# Flattened layer
-layer_flat, num_features = flatten_layer(layer_conv_2)
+    return variable
 
-# Fully-connected Layer 1
-layer_fc_1 = new_fc_layer(layer_flat, num_features, fc_size)
 
-layer_dropout = tf.nn.dropout(layer_fc_1, keep_prob)
-
-# Fully-connected Layer 2
-#layer_fc_2 = new_fc_layer(layer_fc_1, fc_size, num_classes, use_relu=False)
-layer_fc_2 = new_fc_layer(layer_dropout, fc_size, num_classes, use_relu=False)
-
-# Predicted class
-y_pred = tf.nn.softmax(layer_fc_2)
-#y_pred = layer_fc_2
-y_pred_cls = tf.argmax(y_pred, axis=1)
-
-# Cost function to be optimized
-cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=layer_fc_2, labels=y_true)
-cost = tf.reduce_mean(cross_entropy)
+weight_conv_1 = get_weights_variable(layer_name='layer_conv_1')
+weight_conv_2 = get_weights_variable(layer_name='layer_conv_2')
 
 # Optimization Method
-optimizer = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(cost)
+optimizer = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(loss)
+
+y_pred_cls = tf.argmax(y_pred, axis=1)
 
 # Performance Measure
 correct_prediction = tf.equal(y_pred_cls, y_true_cls)
@@ -178,7 +127,7 @@ def optimize(num_iterations):
         x_batch, y_true_batch = data.train.next_batch(train_batch_size)
 
         feed_dict_train = {x: x_batch,
-                           y_true: y_true_batch, keep_prob: 0.5}
+                           y_true: y_true_batch}
 
         session.run(optimizer, feed_dict=feed_dict_train)
 
@@ -258,7 +207,7 @@ def print_test_accuracy(show_example_errors=False,
         labels = data.test.labels[i:j, :]
 
         feed_dict = {x: images,
-                     y_true: labels, keep_prob: 1}
+                     y_true: labels}
 
         cls_pred[i:j] = session.run(y_pred_cls, feed_dict=feed_dict)
 
@@ -284,11 +233,9 @@ def print_test_accuracy(show_example_errors=False,
         plot_confusion_matrix(cls_pred=cls_pred)
 
 
-print_test_accuracy()
-
-# 10000 optimizations
-optimize(10000)
-print_test_accuracy(show_example_errors=False, show_confusion_matrix=False)
+# 2000 optimization
+optimize(2000)
+print_test_accuracy(show_example_errors=True, show_confusion_matrix=True)
 
 
 # Helper function for plotting convolutional weights
@@ -315,7 +262,6 @@ def plot_conv_weights(weights, input_channel=0):
         ax.set_yticks([])
 
     plt.show()
-
 
 
 # Helper function for plotting output of a convolutional layer
