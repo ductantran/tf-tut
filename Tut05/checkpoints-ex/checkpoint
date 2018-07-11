@@ -1,0 +1,7 @@
+model_checkpoint_path: "network5"
+all_model_checkpoint_paths: "network0"
+all_model_checkpoint_paths: "network1"
+all_model_checkpoint_paths: "network2"
+all_model_checkpoint_paths: "network3"
+all_model_checkpoint_paths: "network4"
+all_model_checkpoint_paths: "network5"
